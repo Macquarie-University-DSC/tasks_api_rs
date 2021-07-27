@@ -1,0 +1,76 @@
+name: Deploy Actions
+on:
+  push:
+    branches:
+      - deployed
+jobs:
+  unit-tests:
+    runs-on: ubuntu-20.04
+    services:
+      postgres:
+        image: postgres:13.3-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tasks_db_test
+        ports:
+          - 5432:5432
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost/tasks_db_test
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          components: clippy
+      - uses: actions-rs/install@v0.1
+        with:
+          crate: sqlx-cli
+          version: latest
+          use-tool-cache: true
+      - run: cargo sqlx migrate run
+      - run: cargo clippy
+      - run: cargo test
+  build:
+    needs: unit-tests
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v2
+      - run: sudo apt-get install musl musl-tools
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: x86_64-unknown-linux-musl
+      - run: cargo build --release --target x86_64-unknown-linux-musl
+      - uses: actions/upload-artifact@v2
+        with:
+          name: _build
+          path: target/x86_64-unknown-linux-musl/release/tasks_api_rs
+  deploy:
+    needs: build
+    runs-on: ubuntu-20.04
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/download-artifact@v2
+        with:
+          name: _build
+      - run: ./perms.sh
+      - uses: Burnett01/rsync-deployments@4.1
+        with:
+          switches: -avz --delete
+          path: tasks_api_rs
+          remote_path: /srv/api/tasks_api_rs
+          remote_host: howgood.me
+          remote_user: www
+          remote_key: ${{ secrets.DEPLOY_KEY }}
+      - uses: Burnett01/rsync-deployments@4.1
+        with:
+          switches: -avzr --delete
+          path: migrations/
+          remote_path: /srv/api/migrations/
+          remote_host: howgood.me
+          remote_user: www
+          remote_key: ${{ secrets.DEPLOY_KEY }}
