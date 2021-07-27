@@ -22,12 +22,17 @@ async fn main() -> Result<()> {
     #[cfg(debug_assertions)]
     dotenv::dotenv().ok();
 
+    #[cfg(debug_assertions)]
+    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL environment variable not set");
+
+    #[cfg(not(debug_assertions))]
+    let database_url = env!("DATABASE_URL");
+
     // Start logger
     env_logger::init();
 
     // Set up database with migrations
     let migrations = Migrator::new(Path::new("./migrations")).await?;
-    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL environment variable not set");
     let db_pool = PgPool::connect(&database_url).await?;
     migrations.run(&db_pool).await?;
 
